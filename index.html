@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>数学填字 Puzzle Generator</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="toolbar" aria-label="生成设置">
+        <div>
+          <h1>数学填字</h1>
+          <p>从左上角扩散生成一步运算网络，再随机挖空给小朋友填写。</p>
+        </div>
+
+        <div class="controls">
+          <label>
+            网格
+            <select id="gridSize">
+              <option value="13">13 x 13</option>
+              <option value="17">17 x 17</option>
+              <option value="21">21 x 21</option>
+            </select>
+          </label>
+
+          <label>
+            结果 ≤
+            <input id="maxResult" type="number" min="10" max="999" value="100" />
+          </label>
+
+          <label>
+            算式数量
+            <input id="maxEquations" type="number" min="4" max="80" value="18" />
+          </label>
+
+          <label>
+            挖空比例
+            <input id="blankRatio" type="range" min="10" max="45" value="25" />
+            <span id="blankRatioLabel">25%</span>
+          </label>
+        </div>
+
+        <fieldset class="operator-picker">
+          <legend>运算符</legend>
+          <label><input type="checkbox" name="operator" value="+" checked /> +</label>
+          <label><input type="checkbox" name="operator" value="-" checked /> -</label>
+          <label><input type="checkbox" name="operator" value="×" checked /> ×</label>
+          <label><input type="checkbox" name="operator" value="÷" checked /> ÷</label>
+        </fieldset>
+
+        <div class="actions">
+          <button id="generateButton" type="button">重新生成</button>
+          <button id="toggleAnswerButton" type="button" class="secondary">显示答案</button>
+        </div>
+      </section>
+
+      <section class="board-panel">
+        <div class="board-header">
+          <div>
+            <h2>题面</h2>
+            <p id="summary">准备生成中...</p>
+          </div>
+          <div class="legend" aria-label="图例">
+            <span><i class="number-dot"></i>数字</span>
+            <span><i class="up-dot"></i>+ ×</span>
+            <span><i class="down-dot"></i>- ÷</span>
+            <span><i class="equal-dot"></i>=</span>
+          </div>
+        </div>
+
+        <div id="board" class="board" aria-label="数学填字网格"></div>
+      </section>
+
+      <section class="equation-panel">
+        <h2>算式答案</h2>
+        <div id="equationList" class="equation-list"></div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
