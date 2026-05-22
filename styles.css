@@ -257,6 +257,8 @@ button.secondary {
 .cell.blank {
   background: var(--blank);
   color: transparent;
+  cursor: text;
+  padding: 3px;
 }
 
 .cell.blank.reveal {
@@ -275,22 +277,29 @@ button.secondary {
 }
 
 .answer-input {
-  width: calc(100% - 8px);
-  height: calc(100% - 8px);
+  width: 100%;
+  height: 100%;
   min-width: 0;
   border: 2px solid #d9ad1e;
   border-radius: 5px;
-  background: #fffdf2;
+  background: #fff;
   color: #533f00;
   text-align: center;
   font-size: clamp(13px, 1.35vw, 20px);
   font-weight: 800;
   line-height: 1;
+  caret-color: var(--accent);
+  appearance: none;
+  box-shadow: inset 0 -2px 0 rgba(217, 173, 30, 0.35);
 }
 
 .answer-input:focus {
   border-color: var(--accent);
   outline: 2px solid rgba(27, 95, 214, 0.18);
+}
+
+.answer-input::placeholder {
+  color: #b08a16;
 }
 
 .feedback {

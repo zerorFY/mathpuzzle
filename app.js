@@ -321,6 +321,7 @@ function renderPuzzle() {
       const input = document.createElement("input");
       input.className = "answer-input";
       input.value = cell.userAnswer || "";
+      input.placeholder = "?";
       input.maxLength = cell.type === "operator" ? 1 : 3;
       input.inputMode = cell.type === "number" ? "numeric" : "text";
       input.setAttribute("aria-label", `填空 ${index + 1}`);
@@ -331,6 +332,7 @@ function renderPuzzle() {
         els.feedback.textContent = "";
       });
       node.append(input);
+      node.addEventListener("click", () => input.focus());
     } else {
       node.textContent = cell.hidden && !state.showAnswers ? "" : cell.value;
     }
