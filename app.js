@@ -74,6 +74,12 @@ function getConfig() {
 
 function maxEquationCountForSize(size) {
   const nodeCount = Math.floor((size - 1) / LATTICE_STEP) + 1;
+  const latticeEdges = 2 * nodeCount * (nodeCount - 1);
+  return Math.min(120, latticeEdges + Math.round(size * 1.4));
+}
+
+function latticeEquationCountForSize(size) {
+  const nodeCount = Math.floor((size - 1) / LATTICE_STEP) + 1;
   return 2 * nodeCount * (nodeCount - 1);
 }
 
@@ -215,8 +221,9 @@ function generatePuzzle(config) {
     }
 
     fillRemainingEdges(grid, equations, visitedEdges, config);
+    fillSparseRowsAndColumns(grid, equations, config);
 
-    const targetFloor = Math.min(config.maxEquations, Math.floor(maxEquationCountForSize(config.size) * 0.85));
+    const targetFloor = Math.min(config.maxEquations, latticeEquationCountForSize(config.size) + Math.floor(config.size * 0.6));
     if (equations.length >= Math.max(8, targetFloor) && reviewGrid(grid, equations, config)) {
       applySimpleBlanks(grid, equations, config.blankRatio);
       return { grid, equations };
@@ -284,6 +291,114 @@ function fillRemainingEdges(grid, equations, visitedEdges, config) {
   }
 }
 
+function fillSparseRowsAndColumns(grid, equations, config) {
+  let madeProgress = true;
+  let passes = 0;
+
+  while (madeProgress && equations.length < config.maxEquations && passes < 8) {
+    madeProgress = false;
+    passes += 1;
+
+    const windows = collectSupplementalWindows(grid, config.size);
+    for (const item of windows) {
+      if (equations.length >= config.maxEquations) return;
+      const equation = createEquationForWindow(grid, item.positions, config);
+      if (!equation) continue;
+
+      placeEquation(grid, item.positions, equation);
+      equations.push({ ...equation, positions: item.positions, supplemental: true });
+      madeProgress = true;
+    }
+  }
+}
+
+function collectSupplementalWindows(grid, size) {
+  const windows = [];
+
+  for (let row = 0; row < size; row += 1) {
+    for (let col = 0; col <= size - 5; col += 1) {
+      const positions = Array.from({ length: 5 }, (_, index) => ({ row, col: col + index }));
+      const score = scoreSupplementalWindow(grid, positions);
+      if (score > 0) windows.push({ positions, score });
+    }
+  }
+
+  for (let col = 0; col < size; col += 1) {
+    for (let row = 0; row <= size - 5; row += 1) {
+      const positions = Array.from({ length: 5 }, (_, index) => ({ row: row + index, col }));
+      const score = scoreSupplementalWindow(grid, positions);
+      if (score > 0) windows.push({ positions, score });
+    }
+  }
+
+  return shuffle(windows).sort((a, b) => b.score - a.score);
+}
+
+function scoreSupplementalWindow(grid, positions) {
+  let emptyCount = 0;
+  let numberIntersections = 0;
+
+  for (let index = 0; index < positions.length; index += 1) {
+    const cell = grid[positions[index].row][positions[index].col];
+    const needsNumber = index === 0 || index === 2 || index === 4;
+    const needsOperator = index === 1;
+    const needsEqual = index === 3;
+
+    if (!cell.value) {
+      emptyCount += 1;
+      continue;
+    }
+
+    if (needsNumber && cell.type === "number") {
+      numberIntersections += 1;
+      continue;
+    }
+
+    if (needsOperator && cell.type === "operator") continue;
+    if (needsEqual && cell.type === "equal") continue;
+
+    return 0;
+  }
+
+  if (emptyCount < 3) return 0;
+  return emptyCount * 10 + numberIntersections * 4;
+}
+
+function createEquationForWindow(grid, positions, config) {
+  const fixed = positions.map((pos) => grid[pos.row][pos.col].value || "");
+  const operatorOptions = fixed[1] ? [fixed[1]] : config.operators;
+  const starts = fixed[0] ? [Number(fixed[0])] : Array.from({ length: config.maxResult }, (_, index) => index + 1);
+  const operands = fixed[2] ? [Number(fixed[2])] : Array.from({ length: config.maxResult }, (_, index) => index + 1);
+  const results = fixed[4] ? [Number(fixed[4])] : null;
+  const candidates = [];
+
+  if (fixed[3] && fixed[3] !== "=") return null;
+  if (starts.some((value) => !Number.isFinite(value))) return null;
+  if (operands.some((value) => !Number.isFinite(value))) return null;
+  if (results && results.some((value) => !Number.isFinite(value))) return null;
+
+  for (const start of starts) {
+    for (const operator of operatorOptions) {
+      for (const operand of operands) {
+        const result = calculateResult(start, operator, operand);
+        if (!Number.isInteger(result) || result < 1 || result > config.maxResult) continue;
+        if (results && !results.includes(result)) continue;
+        candidates.push({ start, operator, operand, result });
+      }
+    }
+  }
+
+  return shuffle(candidates)[0] || null;
+}
+
+function calculateResult(start, operator, operand) {
+  if (operator === "+") return start + operand;
+  if (operator === "-" && operand < start) return start - operand;
+  if (operator === "×" && operand > 1) return start * operand;
+  if (operator === "÷" && operand > 1 && start % operand === 0) return start / operand;
+  return NaN;
+}
+
 function reviewGrid(grid, equations, config) {
   return equations.every((equation) => {
     if (equation.result > config.maxResult) return false;
@@ -339,9 +454,15 @@ function applySimpleBlanks(grid, equations, blankRatio) {
 function renderPuzzle() {
   const { grid, equations } = state.puzzle;
   els.board.style.setProperty("--size", grid.length);
+  const tracks = getCompactTracks(grid);
+  els.board.style.gridTemplateColumns = tracks.cols.join(" ");
+  els.board.style.gridTemplateRows = tracks.rows.join(" ");
   els.board.innerHTML = "";
 
-  grid.flat().forEach((cell, index) => {
+  grid.forEach((row, rowIndex) => {
+    row.forEach((cell, colIndex) => {
+    if (!cell.value) return;
+
     const node = document.createElement("div");
     const opClass = cell.value === "+" || cell.value === "×" ? "up" : cell.value === "-" || cell.value === "÷" ? "down" : "";
     node.className = [
@@ -354,6 +475,8 @@ function renderPuzzle() {
     ]
       .filter(Boolean)
       .join(" ");
+    node.style.gridRow = String(rowIndex + 1);
+    node.style.gridColumn = String(colIndex + 1);
 
     if (cell.hidden && !state.showAnswers) {
       const input = document.createElement("input");
@@ -362,7 +485,7 @@ function renderPuzzle() {
       input.placeholder = "?";
       input.maxLength = cell.type === "operator" ? 1 : 3;
       input.inputMode = cell.type === "number" ? "numeric" : "text";
-      input.setAttribute("aria-label", `填空 ${index + 1}`);
+      input.setAttribute("aria-label", `填空 ${rowIndex + 1}-${colIndex + 1}`);
       input.addEventListener("input", () => {
         cell.userAnswer = input.value;
         cell.status = "";
@@ -376,6 +499,7 @@ function renderPuzzle() {
     }
 
     els.board.append(node);
+    });
   });
 
   const blankCount = grid.flat().filter((cell) => cell.hidden).length;
@@ -388,6 +512,19 @@ function renderPuzzle() {
     )
     .join("");
   els.toggleAnswerButton.textContent = state.showAnswers ? "隐藏答案" : "显示答案";
+}
+
+function getCompactTracks(grid) {
+  const size = grid.length;
+  const rowCounts = grid.map((row) => row.filter((cell) => cell.value).length);
+  const colCounts = Array.from({ length: size }, (_, col) =>
+    grid.reduce((count, row) => count + (row[col].value ? 1 : 0), 0),
+  );
+
+  return {
+    rows: rowCounts.map((count) => (count === 0 ? "8px" : count <= 2 ? "34px" : "52px")),
+    cols: colCounts.map((count) => (count === 0 ? "8px" : count <= 2 ? "34px" : "52px")),
+  };
 }
 
 function normalizeAnswer(value) {
