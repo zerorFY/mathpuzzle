@@ -255,18 +255,47 @@ button.secondary {
 }
 
 .cell.blank {
-  background:
-    linear-gradient(90deg, transparent 0 22%, rgba(0, 0, 0, 0.22) 22% 78%, transparent 78%),
-    var(--blank);
-  background-size: 100% 2px, auto;
-  background-position: center 62%, 0 0;
-  background-repeat: no-repeat;
+  background: var(--blank);
   color: transparent;
 }
 
 .cell.blank.reveal {
   outline: 2px solid #f0be24;
   color: #5a4100;
+}
+
+.cell.correct {
+  outline: 2px solid #20a464;
+  background: #e2f8ed;
+}
+
+.cell.incorrect {
+  outline: 2px solid #d6453d;
+  background: #ffe3e0;
+}
+
+.answer-input {
+  width: calc(100% - 8px);
+  height: calc(100% - 8px);
+  min-width: 0;
+  border: 2px solid #d9ad1e;
+  border-radius: 5px;
+  background: #fffdf2;
+  color: #533f00;
+  text-align: center;
+  font-size: clamp(13px, 1.35vw, 20px);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.answer-input:focus {
+  border-color: var(--accent);
+  outline: 2px solid rgba(27, 95, 214, 0.18);
+}
+
+.feedback {
+  min-height: 24px;
+  font-weight: 700;
 }
 
 .equation-panel {

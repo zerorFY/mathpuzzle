@@ -1,6 +1,7 @@
 const state = {
   puzzle: null,
   showAnswers: false,
+  checked: false,
 };
 
 const els = {
@@ -13,7 +14,10 @@ const els = {
   blankRatio: document.querySelector("#blankRatio"),
   blankRatioLabel: document.querySelector("#blankRatioLabel"),
   generateButton: document.querySelector("#generateButton"),
+  checkButton: document.querySelector("#checkButton"),
+  clearButton: document.querySelector("#clearButton"),
   toggleAnswerButton: document.querySelector("#toggleAnswerButton"),
+  feedback: document.querySelector("#feedback"),
 };
 
 const OPERATORS = ["+", "-", "×", "÷"];
@@ -62,7 +66,7 @@ function getConfig() {
     size,
     maxResult: clamp(Number(els.maxResult.value) || 100, 10, 999),
     maxEquations: clamp(Number(els.maxEquations.value) || 18, 4, 80),
-    blankRatio: clamp(Number(els.blankRatio.value) || 25, 10, 45) / 100,
+    blankRatio: clamp(Number(els.blankRatio.value) || 60, 30, 85) / 100,
     operators: getSelectedOperators(),
   };
 }
@@ -176,6 +180,8 @@ function placeEquation(grid, positions, equation) {
     Object.assign(grid[pos.row][pos.col], payload[index], {
       hidden: false,
       answer: payload[index].value,
+      userAnswer: "",
+      status: "",
     });
   });
 }
@@ -266,7 +272,8 @@ function applySimpleBlanks(grid, equations, blankRatio) {
     });
   });
 
-  const targetBlankCount = Math.max(1, Math.round(equations.length * blankRatio));
+  const maxBlanksPerEquation = 2;
+  const targetBlankCount = Math.max(equations.length, Math.round(equations.length * maxBlanksPerEquation * blankRatio));
   const candidates = shuffle([...cellToEquations.keys()]);
   let blanks = 0;
 
@@ -274,7 +281,7 @@ function applySimpleBlanks(grid, equations, blankRatio) {
     if (blanks >= targetBlankCount) break;
 
     const linked = cellToEquations.get(key);
-    if (linked.some((equationIndex) => equationBlankCounts.get(equationIndex) >= 1)) continue;
+    if (linked.some((equationIndex) => equationBlankCounts.get(equationIndex) >= maxBlanksPerEquation)) continue;
 
     const [row, col] = key.split(",").map(Number);
     const cell = grid[row][col];
@@ -282,6 +289,8 @@ function applySimpleBlanks(grid, equations, blankRatio) {
 
     cell.hidden = true;
     cell.answer = cell.value;
+    cell.userAnswer = "";
+    cell.status = "";
     linked.forEach((equationIndex) => {
       equationBlankCounts.set(equationIndex, equationBlankCounts.get(equationIndex) + 1);
     });
@@ -294,17 +303,43 @@ function renderPuzzle() {
   els.board.style.setProperty("--size", grid.length);
   els.board.innerHTML = "";
 
-  grid.flat().forEach((cell) => {
+  grid.flat().forEach((cell, index) => {
     const node = document.createElement("div");
     const opClass = cell.value === "+" || cell.value === "×" ? "up" : cell.value === "-" || cell.value === "÷" ? "down" : "";
-    node.className = ["cell", cell.type, opClass, cell.hidden ? "blank" : "", cell.hidden && state.showAnswers ? "reveal" : ""]
+    node.className = [
+      "cell",
+      cell.type,
+      opClass,
+      cell.hidden ? "blank" : "",
+      cell.hidden && state.showAnswers ? "reveal" : "",
+      cell.hidden && state.checked ? cell.status : "",
+    ]
       .filter(Boolean)
       .join(" ");
-    node.textContent = cell.hidden && !state.showAnswers ? "" : cell.value;
+
+    if (cell.hidden && !state.showAnswers) {
+      const input = document.createElement("input");
+      input.className = "answer-input";
+      input.value = cell.userAnswer || "";
+      input.maxLength = cell.type === "operator" ? 1 : 3;
+      input.inputMode = cell.type === "number" ? "numeric" : "text";
+      input.setAttribute("aria-label", `填空 ${index + 1}`);
+      input.addEventListener("input", () => {
+        cell.userAnswer = input.value;
+        cell.status = "";
+        state.checked = false;
+        els.feedback.textContent = "";
+      });
+      node.append(input);
+    } else {
+      node.textContent = cell.hidden && !state.showAnswers ? "" : cell.value;
+    }
+
     els.board.append(node);
   });
 
-  els.summary.textContent = `${grid.length} x ${grid.length}，${equations.length} 条算式，已按简单策略挖空。`;
+  const blankCount = grid.flat().filter((cell) => cell.hidden).length;
+  els.summary.textContent = `${grid.length} x ${grid.length}，${equations.length} 条算式，${blankCount} 个填空。`;
   els.equationList.classList.toggle("hidden-answer", !state.showAnswers);
   els.equationList.innerHTML = equations
     .map(
@@ -315,10 +350,55 @@ function renderPuzzle() {
   els.toggleAnswerButton.textContent = state.showAnswers ? "隐藏答案" : "显示答案";
 }
 
+function normalizeAnswer(value) {
+  return String(value)
+    .trim()
+    .replaceAll("*", "×")
+    .replaceAll("x", "×")
+    .replaceAll("X", "×")
+    .replaceAll("/", "÷");
+}
+
+function checkAnswers() {
+  if (!state.puzzle) return;
+
+  let total = 0;
+  let correct = 0;
+
+  state.puzzle.grid.flat().forEach((cell) => {
+    if (!cell.hidden) return;
+    total += 1;
+    const isCorrect = normalizeAnswer(cell.userAnswer) === normalizeAnswer(cell.answer);
+    cell.status = isCorrect ? "correct" : "incorrect";
+    if (isCorrect) correct += 1;
+  });
+
+  state.checked = true;
+  state.showAnswers = false;
+  els.feedback.textContent = correct === total ? `全对！${correct}/${total}` : `答对 ${correct}/${total} 个，红色的再想一想。`;
+  renderPuzzle();
+}
+
+function clearAnswers() {
+  if (!state.puzzle) return;
+
+  state.puzzle.grid.flat().forEach((cell) => {
+    if (!cell.hidden) return;
+    cell.userAnswer = "";
+    cell.status = "";
+  });
+  state.checked = false;
+  state.showAnswers = false;
+  els.feedback.textContent = "";
+  renderPuzzle();
+}
+
 function regenerate() {
   try {
     state.showAnswers = false;
+    state.checked = false;
     state.puzzle = generatePuzzle(getConfig());
+    els.feedback.textContent = "";
     renderPuzzle();
   } catch (error) {
     els.summary.textContent = error.message;
@@ -330,6 +410,8 @@ els.blankRatio.addEventListener("input", () => {
 });
 
 els.generateButton.addEventListener("click", regenerate);
+els.checkButton.addEventListener("click", checkAnswers);
+els.clearButton.addEventListener("click", clearAnswers);
 
 els.toggleAnswerButton.addEventListener("click", () => {
   if (!state.puzzle) return;
