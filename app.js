@@ -62,13 +62,19 @@ function getSelectedOperators() {
 
 function getConfig() {
   const size = Number(els.gridSize.value);
+  const maxEdges = maxEquationCountForSize(size);
   return {
     size,
     maxResult: clamp(Number(els.maxResult.value) || 100, 10, 999),
-    maxEquations: clamp(Number(els.maxEquations.value) || 18, 4, 80),
+    maxEquations: clamp(Number(els.maxEquations.value) || maxEdges, 4, maxEdges),
     blankRatio: clamp(Number(els.blankRatio.value) || 60, 30, 85) / 100,
     operators: getSelectedOperators(),
   };
+}
+
+function maxEquationCountForSize(size) {
+  const nodeCount = Math.floor((size - 1) / LATTICE_STEP) + 1;
+  return 2 * nodeCount * (nodeCount - 1);
 }
 
 function clamp(value, min, max) {
@@ -80,12 +86,12 @@ function validNode(row, col, size) {
 }
 
 function getNeighbors(node, size) {
-  return shuffle([
+  return [
     { row: node.row, col: node.col + LATTICE_STEP, direction: "right" },
     { row: node.row + LATTICE_STEP, col: node.col, direction: "down" },
     { row: node.row, col: node.col - LATTICE_STEP, direction: "left" },
     { row: node.row - LATTICE_STEP, col: node.col, direction: "up" },
-  ]).filter((next) => validNode(next.row, next.col, size));
+  ].filter((next) => validNode(next.row, next.col, size));
 }
 
 function linePositions(start, end) {
@@ -187,7 +193,7 @@ function placeEquation(grid, positions, equation) {
 }
 
 function generatePuzzle(config) {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     const grid = makeGrid(config.size);
     const equations = [];
     const startValue = randomInt(2, Math.min(config.maxResult, 30));
@@ -201,49 +207,81 @@ function generatePuzzle(config) {
       const startNode = queue[cursor];
       cursor += 1;
 
-      for (const endNode of getNeighbors(startNode, config.size)) {
+      for (const endNode of shuffle(getNeighbors(startNode, config.size))) {
         if (equations.length >= config.maxEquations) break;
-
-        const edgeId = [cellKey(startNode.row, startNode.col), cellKey(endNode.row, endNode.col)].sort().join("|");
-        if (visitedEdges.has(edgeId) || Math.random() < 0.18) continue;
-
-        const positions = linePositions(startNode, endNode);
-        const middleCellsClear = positions.slice(1, 4).every((pos) => !grid[pos.row][pos.col].value);
-        if (!middleCellsClear) continue;
-
-        const start = Number(grid[startNode.row][startNode.col].value);
-        const targetCell = grid[endNode.row][endNode.col];
-        const targetWasEmpty = !targetCell.value;
-        const target = targetCell.value ? Number(targetCell.value) : undefined;
-        const candidate = candidateEquations(start, target, config).find((item) =>
-          canPlace(grid, positions, { ...item, start }),
-        );
-
-        if (!candidate) continue;
-
-        const equation = {
-          start,
-          operator: candidate.operator,
-          operand: candidate.operand,
-          result: candidate.result,
-          positions,
-        };
-
-        placeEquation(grid, positions, equation);
-        equations.push(equation);
-        visitedEdges.add(edgeId);
-
-        if (targetWasEmpty) queue.push({ row: endNode.row, col: endNode.col });
+        const placed = tryPlaceEdge(grid, equations, visitedEdges, startNode, endNode, config);
+        if (placed && placed.targetWasEmpty) queue.push({ row: endNode.row, col: endNode.col });
       }
     }
 
-    if (equations.length >= Math.min(config.maxEquations, 8) && reviewGrid(grid, equations, config)) {
+    fillRemainingEdges(grid, equations, visitedEdges, config);
+
+    const targetFloor = Math.min(config.maxEquations, Math.floor(maxEquationCountForSize(config.size) * 0.85));
+    if (equations.length >= Math.max(8, targetFloor) && reviewGrid(grid, equations, config)) {
       applySimpleBlanks(grid, equations, config.blankRatio);
       return { grid, equations };
     }
   }
 
   throw new Error("生成失败，请减少算式数量或放宽结果上限。");
+}
+
+function tryPlaceEdge(grid, equations, visitedEdges, startNode, endNode, config) {
+  const edgeId = [cellKey(startNode.row, startNode.col), cellKey(endNode.row, endNode.col)].sort().join("|");
+  if (visitedEdges.has(edgeId)) return null;
+
+  const positions = linePositions(startNode, endNode);
+  const middleCellsClear = positions.slice(1, 4).every((pos) => !grid[pos.row][pos.col].value);
+  if (!middleCellsClear) return null;
+
+  const start = Number(grid[startNode.row][startNode.col].value);
+  if (!start) return null;
+
+  const targetCell = grid[endNode.row][endNode.col];
+  const targetWasEmpty = !targetCell.value;
+  const target = targetCell.value ? Number(targetCell.value) : undefined;
+  const candidate = candidateEquations(start, target, config).find((item) =>
+    canPlace(grid, positions, { ...item, start }),
+  );
+
+  if (!candidate) return null;
+
+  const equation = {
+    start,
+    operator: candidate.operator,
+    operand: candidate.operand,
+    result: candidate.result,
+    positions,
+  };
+
+  placeEquation(grid, positions, equation);
+  equations.push(equation);
+  visitedEdges.add(edgeId);
+
+  return { targetWasEmpty };
+}
+
+function fillRemainingEdges(grid, equations, visitedEdges, config) {
+  let madeProgress = true;
+
+  while (madeProgress && equations.length < config.maxEquations) {
+    madeProgress = false;
+    const nodes = [];
+
+    for (let row = 0; row < config.size; row += LATTICE_STEP) {
+      for (let col = 0; col < config.size; col += LATTICE_STEP) {
+        if (grid[row][col].value) nodes.push({ row, col });
+      }
+    }
+
+    for (const node of shuffle(nodes)) {
+      for (const endNode of shuffle(getNeighbors(node, config.size))) {
+        if (equations.length >= config.maxEquations) return;
+        const placed = tryPlaceEdge(grid, equations, visitedEdges, node, endNode, config);
+        if (placed) madeProgress = true;
+      }
+    }
+  }
 }
 
 function reviewGrid(grid, equations, config) {
@@ -409,6 +447,10 @@ function regenerate() {
 
 els.blankRatio.addEventListener("input", () => {
   els.blankRatioLabel.textContent = `${els.blankRatio.value}%`;
+});
+
+els.gridSize.addEventListener("change", () => {
+  els.maxEquations.value = String(maxEquationCountForSize(Number(els.gridSize.value)));
 });
 
 els.generateButton.addEventListener("click", regenerate);
