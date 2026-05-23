@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>数学填字 Puzzle Generator</title>
-    <link rel="stylesheet" href="styles.css?v=4" />
+    <link rel="stylesheet" href="styles.css?v=5" />
   </head>
   <body>
     <main class="app-shell">
@@ -54,8 +54,6 @@
         <div class="actions">
           <button id="generateButton" type="button">重新生成</button>
           <button id="checkButton" type="button">检查答案</button>
-          <button id="clearButton" type="button" class="secondary">清空填写</button>
-          <button id="toggleAnswerButton" type="button" class="secondary">显示答案</button>
         </div>
         <p id="feedback" class="feedback" aria-live="polite"></p>
       </section>
@@ -77,12 +75,8 @@
         <div id="board" class="board" aria-label="数学填字网格"></div>
       </section>
 
-      <section class="equation-panel">
-        <h2>算式答案</h2>
-        <div id="equationList" class="equation-list"></div>
-      </section>
     </main>
 
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
   </body>
 </html>

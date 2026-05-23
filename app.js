@@ -1,12 +1,10 @@
 const state = {
   puzzle: null,
-  showAnswers: false,
   checked: false,
 };
 
 const els = {
   board: document.querySelector("#board"),
-  equationList: document.querySelector("#equationList"),
   summary: document.querySelector("#summary"),
   gridSize: document.querySelector("#gridSize"),
   maxResult: document.querySelector("#maxResult"),
@@ -14,8 +12,6 @@ const els = {
   blankPerEquation: document.querySelector("#blankPerEquation"),
   generateButton: document.querySelector("#generateButton"),
   checkButton: document.querySelector("#checkButton"),
-  clearButton: document.querySelector("#clearButton"),
-  toggleAnswerButton: document.querySelector("#toggleAnswerButton"),
   feedback: document.querySelector("#feedback"),
 };
 
@@ -95,8 +91,6 @@ function getNeighbors(node, size) {
   return [
     { row: node.row, col: node.col + LATTICE_STEP, direction: "right" },
     { row: node.row + LATTICE_STEP, col: node.col, direction: "down" },
-    { row: node.row, col: node.col - LATTICE_STEP, direction: "left" },
-    { row: node.row - LATTICE_STEP, col: node.col, direction: "up" },
   ].filter((next) => validNode(next.row, next.col, size));
 }
 
@@ -227,6 +221,7 @@ function generatePuzzle(config) {
     if (
       equations.length >= Math.max(8, targetFloor) &&
       reviewGrid(grid, equations, config) &&
+      reviewReadableEquations(grid, config) &&
       meetsOperatorMixMinimum(equations, config)
     ) {
       applySimpleBlanks(grid, equations, config.blankPerEquation);
@@ -459,6 +454,44 @@ function reviewGrid(grid, equations, config) {
   });
 }
 
+function reviewReadableEquations(grid, config) {
+  for (let row = 0; row < grid.length; row += 1) {
+    for (let col = 0; col <= grid.length - 5; col += 1) {
+      const cells = Array.from({ length: 5 }, (_, index) => grid[row][col + index]);
+      if (isEquationPattern(cells) && !isValidEquationCells(cells, config)) return false;
+    }
+  }
+
+  for (let col = 0; col < grid.length; col += 1) {
+    for (let row = 0; row <= grid.length - 5; row += 1) {
+      const cells = Array.from({ length: 5 }, (_, index) => grid[row + index][col]);
+      if (isEquationPattern(cells) && !isValidEquationCells(cells, config)) return false;
+    }
+  }
+
+  return true;
+}
+
+function isEquationPattern(cells) {
+  return (
+    cells[0].type === "number" &&
+    cells[1].type === "operator" &&
+    cells[2].type === "number" &&
+    cells[3].type === "equal" &&
+    cells[4].type === "number"
+  );
+}
+
+function isValidEquationCells(cells, config) {
+  const start = Number(cells[0].value);
+  const operator = cells[1].value;
+  const operand = Number(cells[2].value);
+  const result = Number(cells[4].value);
+  if (!Number.isFinite(start) || !Number.isFinite(operand) || !Number.isFinite(result)) return false;
+  if (result > config.maxResult) return false;
+  return calculateResult(start, operator, operand) === result;
+}
+
 function applySimpleBlanks(grid, equations, maxBlanksPerEquation) {
   const equationBlankCounts = new Map();
   const cellToEquations = new Map();
@@ -474,10 +507,24 @@ function applySimpleBlanks(grid, equations, maxBlanksPerEquation) {
   });
 
   const targetBlankCount = equations.length * maxBlanksPerEquation;
+  const operatorBlankLimit = Math.floor(targetBlankCount * 0.3);
   const candidates = shuffle([...cellToEquations.keys()]);
+  const numberCandidates = [];
+  const operatorCandidates = [];
   let blanks = 0;
+  let operatorBlanks = 0;
 
-  for (const key of candidates) {
+  candidates.forEach((key) => {
+    const [row, col] = key.split(",").map(Number);
+    const cell = grid[row][col];
+    if (cell.type === "operator") {
+      operatorCandidates.push(key);
+    } else {
+      numberCandidates.push(key);
+    }
+  });
+
+  for (const key of [...numberCandidates, ...operatorCandidates]) {
     if (blanks >= targetBlankCount) break;
 
     const linked = cellToEquations.get(key);
@@ -486,6 +533,7 @@ function applySimpleBlanks(grid, equations, maxBlanksPerEquation) {
     const [row, col] = key.split(",").map(Number);
     const cell = grid[row][col];
     if (!cell.value || cell.value === "=") continue;
+    if (cell.type === "operator" && operatorBlanks >= operatorBlankLimit) continue;
 
     cell.hidden = true;
     cell.answer = cell.value;
@@ -495,6 +543,7 @@ function applySimpleBlanks(grid, equations, maxBlanksPerEquation) {
       equationBlankCounts.set(equationIndex, equationBlankCounts.get(equationIndex) + 1);
     });
     blanks += 1;
+    if (cell.type === "operator") operatorBlanks += 1;
   }
 }
 
@@ -517,7 +566,6 @@ function renderPuzzle() {
       cell.type,
       opClass,
       cell.hidden ? "blank" : "",
-      cell.hidden && state.showAnswers ? "reveal" : "",
       cell.hidden && state.checked ? cell.status : "",
     ]
       .filter(Boolean)
@@ -525,7 +573,7 @@ function renderPuzzle() {
     node.style.gridRow = String(rowIndex + 1);
     node.style.gridColumn = String(colIndex + 1);
 
-    if (cell.hidden && !state.showAnswers) {
+    if (cell.hidden) {
       const input = document.createElement("input");
       input.className = "answer-input";
       input.value = cell.userAnswer || "";
@@ -542,7 +590,7 @@ function renderPuzzle() {
       node.append(input);
       node.addEventListener("click", () => input.focus());
     } else {
-      node.textContent = cell.hidden && !state.showAnswers ? "" : cell.value;
+      node.textContent = cell.value;
     }
 
     els.board.append(node);
@@ -551,14 +599,6 @@ function renderPuzzle() {
 
   const blankCount = grid.flat().filter((cell) => cell.hidden).length;
   els.summary.textContent = `${grid.length} x ${grid.length}，${equations.length} 条算式，${blankCount} 个填空。`;
-  els.equationList.classList.toggle("hidden-answer", !state.showAnswers);
-  els.equationList.innerHTML = equations
-    .map(
-      (item, index) =>
-        `<div class="equation-item">${index + 1}. ${item.start} ${item.operator} ${item.operand} = ${item.result}</div>`,
-    )
-    .join("");
-  els.toggleAnswerButton.textContent = state.showAnswers ? "隐藏答案" : "显示答案";
 }
 
 function getCompactTracks(grid) {
@@ -598,28 +638,12 @@ function checkAnswers() {
   });
 
   state.checked = true;
-  state.showAnswers = false;
   els.feedback.textContent = correct === total ? `全对！${correct}/${total}` : `答对 ${correct}/${total} 个，红色的再想一想。`;
-  renderPuzzle();
-}
-
-function clearAnswers() {
-  if (!state.puzzle) return;
-
-  state.puzzle.grid.flat().forEach((cell) => {
-    if (!cell.hidden) return;
-    cell.userAnswer = "";
-    cell.status = "";
-  });
-  state.checked = false;
-  state.showAnswers = false;
-  els.feedback.textContent = "";
   renderPuzzle();
 }
 
 function regenerate() {
   try {
-    state.showAnswers = false;
     state.checked = false;
     state.puzzle = generatePuzzle(getConfig());
     els.feedback.textContent = "";
@@ -629,18 +653,17 @@ function regenerate() {
   }
 }
 
+function confirmAndRegenerate() {
+  if (!state.puzzle || window.confirm("确定要重新生成？当前填写会被清空。")) {
+    regenerate();
+  }
+}
+
 els.gridSize.addEventListener("change", () => {
   els.maxEquations.value = String(maxEquationCountForSize(Number(els.gridSize.value)));
 });
 
-els.generateButton.addEventListener("click", regenerate);
+els.generateButton.addEventListener("click", confirmAndRegenerate);
 els.checkButton.addEventListener("click", checkAnswers);
-els.clearButton.addEventListener("click", clearAnswers);
-
-els.toggleAnswerButton.addEventListener("click", () => {
-  if (!state.puzzle) return;
-  state.showAnswers = !state.showAnswers;
-  renderPuzzle();
-});
 
 regenerate();
