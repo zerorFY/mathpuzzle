@@ -11,8 +11,7 @@ const els = {
   gridSize: document.querySelector("#gridSize"),
   maxResult: document.querySelector("#maxResult"),
   maxEquations: document.querySelector("#maxEquations"),
-  blankRatio: document.querySelector("#blankRatio"),
-  blankRatioLabel: document.querySelector("#blankRatioLabel"),
+  blankPerEquation: document.querySelector("#blankPerEquation"),
   generateButton: document.querySelector("#generateButton"),
   checkButton: document.querySelector("#checkButton"),
   clearButton: document.querySelector("#clearButton"),
@@ -21,6 +20,7 @@ const els = {
 };
 
 const OPERATORS = ["+", "-", "×", "÷"];
+const ADVANCED_OPERATORS = new Set(["×", "÷"]);
 const LATTICE_STEP = 4;
 
 function createCell() {
@@ -67,7 +67,7 @@ function getConfig() {
     size,
     maxResult: clamp(Number(els.maxResult.value) || 100, 10, 999),
     maxEquations: clamp(Number(els.maxEquations.value) || maxEdges, 4, maxEdges),
-    blankRatio: clamp(Number(els.blankRatio.value) || 60, 30, 85) / 100,
+    blankPerEquation: clamp(Number(els.blankPerEquation.value) || 1, 1, 2),
     operators: getSelectedOperators(),
   };
 }
@@ -224,8 +224,12 @@ function generatePuzzle(config) {
     fillSparseRowsAndColumns(grid, equations, config);
 
     const targetFloor = Math.min(config.maxEquations, latticeEquationCountForSize(config.size) + Math.floor(config.size * 0.6));
-    if (equations.length >= Math.max(8, targetFloor) && reviewGrid(grid, equations, config)) {
-      applySimpleBlanks(grid, equations, config.blankRatio);
+    if (
+      equations.length >= Math.max(8, targetFloor) &&
+      reviewGrid(grid, equations, config) &&
+      meetsOperatorMixMinimum(equations, config)
+    ) {
+      applySimpleBlanks(grid, equations, config.blankPerEquation);
       return { grid, equations };
     }
   }
@@ -247,9 +251,10 @@ function tryPlaceEdge(grid, equations, visitedEdges, startNode, endNode, config)
   const targetCell = grid[endNode.row][endNode.col];
   const targetWasEmpty = !targetCell.value;
   const target = targetCell.value ? Number(targetCell.value) : undefined;
-  const candidate = candidateEquations(start, target, config).find((item) =>
+  const candidates = candidateEquations(start, target, config).filter((item) =>
     canPlace(grid, positions, { ...item, start }),
   );
+  const candidate = chooseCandidateByOperatorMix(candidates, equations, config);
 
   if (!candidate) return null;
 
@@ -302,7 +307,7 @@ function fillSparseRowsAndColumns(grid, equations, config) {
     const windows = collectSupplementalWindows(grid, config.size);
     for (const item of windows) {
       if (equations.length >= config.maxEquations) return;
-      const equation = createEquationForWindow(grid, item.positions, config);
+      const equation = createEquationForWindow(grid, item.positions, equations, config);
       if (!equation) continue;
 
       placeEquation(grid, item.positions, equation);
@@ -364,7 +369,7 @@ function scoreSupplementalWindow(grid, positions) {
   return emptyCount * 10 + numberIntersections * 4;
 }
 
-function createEquationForWindow(grid, positions, config) {
+function createEquationForWindow(grid, positions, equations, config) {
   const fixed = positions.map((pos) => grid[pos.row][pos.col].value || "");
   const operatorOptions = fixed[1] ? [fixed[1]] : config.operators;
   const starts = fixed[0] ? [Number(fixed[0])] : Array.from({ length: config.maxResult }, (_, index) => index + 1);
@@ -388,7 +393,7 @@ function createEquationForWindow(grid, positions, config) {
     }
   }
 
-  return shuffle(candidates)[0] || null;
+  return chooseCandidateByOperatorMix(candidates, equations, config);
 }
 
 function calculateResult(start, operator, operand) {
@@ -397,6 +402,49 @@ function calculateResult(start, operator, operand) {
   if (operator === "×" && operand > 1) return start * operand;
   if (operator === "÷" && operand > 1 && start % operand === 0) return start / operand;
   return NaN;
+}
+
+function chooseCandidateByOperatorMix(candidates, equations, config) {
+  if (!candidates.length) return null;
+
+  const hasBasic = config.operators.some((operator) => !ADVANCED_OPERATORS.has(operator));
+  const hasAdvanced = config.operators.some((operator) => ADVANCED_OPERATORS.has(operator));
+  if (!hasBasic || !hasAdvanced) return shuffle(candidates)[0];
+
+  const advancedTarget = Math.ceil(config.maxEquations * getAdvancedOperatorTargetRatio(config));
+  const advancedCount = equations.filter((equation) => ADVANCED_OPERATORS.has(equation.operator)).length;
+  const remainingSlots = Math.max(1, config.maxEquations - equations.length);
+  const advancedNeeded = advancedTarget - advancedCount;
+
+  const advancedCandidates = candidates.filter((item) => ADVANCED_OPERATORS.has(item.operator));
+  const basicCandidates = candidates.filter((item) => !ADVANCED_OPERATORS.has(item.operator));
+
+  if (advancedNeeded >= remainingSlots && advancedCandidates.length) {
+    return shuffle(advancedCandidates)[0];
+  }
+
+  if (advancedNeeded > 0 && advancedCandidates.length) {
+    return shuffle(advancedCandidates)[0];
+  }
+
+  if (basicCandidates.length) {
+    return shuffle(basicCandidates)[0];
+  }
+
+  return shuffle(candidates)[0];
+}
+
+function getAdvancedOperatorTargetRatio(config) {
+  return 0.34;
+}
+
+function meetsOperatorMixMinimum(equations, config) {
+  const hasBasic = config.operators.some((operator) => !ADVANCED_OPERATORS.has(operator));
+  const hasAdvanced = config.operators.some((operator) => ADVANCED_OPERATORS.has(operator));
+  if (!hasBasic || !hasAdvanced) return true;
+
+  const advancedCount = equations.filter((equation) => ADVANCED_OPERATORS.has(equation.operator)).length;
+  return advancedCount >= Math.ceil(equations.length * 0.3);
 }
 
 function reviewGrid(grid, equations, config) {
@@ -411,7 +459,7 @@ function reviewGrid(grid, equations, config) {
   });
 }
 
-function applySimpleBlanks(grid, equations, blankRatio) {
+function applySimpleBlanks(grid, equations, maxBlanksPerEquation) {
   const equationBlankCounts = new Map();
   const cellToEquations = new Map();
 
@@ -425,8 +473,7 @@ function applySimpleBlanks(grid, equations, blankRatio) {
     });
   });
 
-  const maxBlanksPerEquation = 2;
-  const targetBlankCount = Math.max(equations.length, Math.round(equations.length * maxBlanksPerEquation * blankRatio));
+  const targetBlankCount = equations.length * maxBlanksPerEquation;
   const candidates = shuffle([...cellToEquations.keys()]);
   let blanks = 0;
 
@@ -581,10 +628,6 @@ function regenerate() {
     els.summary.textContent = error.message;
   }
 }
-
-els.blankRatio.addEventListener("input", () => {
-  els.blankRatioLabel.textContent = `${els.blankRatio.value}%`;
-});
 
 els.gridSize.addEventListener("change", () => {
   els.maxEquations.value = String(maxEquationCountForSize(Number(els.gridSize.value)));
