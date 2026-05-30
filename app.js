@@ -8,8 +8,6 @@ const els = {
   summary: document.querySelector("#summary"),
   gridSize: document.querySelector("#gridSize"),
   maxResult: document.querySelector("#maxResult"),
-  maxEquations: document.querySelector("#maxEquations"),
-  blankPerEquation: document.querySelector("#blankPerEquation"),
   generateButton: document.querySelector("#generateButton"),
   checkButton: document.querySelector("#checkButton"),
   feedback: document.querySelector("#feedback"),
@@ -62,8 +60,8 @@ function getConfig() {
   return {
     size,
     maxResult: clamp(Number(els.maxResult.value) || 100, 10, 999),
-    maxEquations: clamp(Number(els.maxEquations.value) || maxEdges, 4, maxEdges),
-    blankPerEquation: clamp(Number(els.blankPerEquation.value) || 1, 1, 2),
+    maxEquations: maxEdges,
+    blankPerEquation: 1,
     operators: getSelectedOperators(),
   };
 }
@@ -575,20 +573,28 @@ function renderPuzzle() {
 
     if (cell.hidden) {
       const input = document.createElement("input");
+      input.type = "text";
       input.className = "answer-input";
       input.value = cell.userAnswer || "";
       input.placeholder = "?";
-      input.maxLength = cell.type === "operator" ? 1 : 3;
+      input.maxLength = cell.type === "operator" ? 2 : 3;
       input.inputMode = cell.type === "number" ? "numeric" : "text";
       input.setAttribute("aria-label", `填空 ${rowIndex + 1}-${colIndex + 1}`);
+      input.addEventListener("focus", () => moveCursorToEnd(input));
+      input.addEventListener("click", () => moveCursorToEnd(input));
       input.addEventListener("input", () => {
+        input.value = normalizeUserInput(input.value, cell.type);
         cell.userAnswer = input.value;
         cell.status = "";
         state.checked = false;
         els.feedback.textContent = "";
+        moveCursorToEnd(input);
       });
       node.append(input);
-      node.addEventListener("click", () => input.focus());
+      node.addEventListener("click", () => {
+        input.focus();
+        moveCursorToEnd(input);
+      });
     } else {
       node.textContent = cell.value;
     }
@@ -614,13 +620,68 @@ function getCompactTracks(grid) {
   };
 }
 
+function moveCursorToEnd(input) {
+  const schedule = typeof requestAnimationFrame === "function" ? requestAnimationFrame : setTimeout;
+  schedule(() => {
+    const end = input.value.length;
+    if (typeof input.setSelectionRange === "function") {
+      input.setSelectionRange(end, end);
+    }
+  });
+}
+
+function normalizeUserInput(value, type) {
+  if (type === "operator") return normalizeOperatorInput(value);
+  return String(value).trim();
+}
+
 function normalizeAnswer(value) {
-  return String(value)
-    .trim()
-    .replaceAll("*", "×")
-    .replaceAll("x", "×")
-    .replaceAll("X", "×")
-    .replaceAll("/", "÷");
+  const text = String(value).trim();
+  if (/^\d+$/.test(text)) return text;
+  return normalizeOperatorInput(text);
+}
+
+function normalizeOperatorInput(value) {
+  const compact = String(value).trim();
+  const operatorMap = new Map([
+    ["＋", "+"],
+    ["﹢", "+"],
+    ["-", "-"],
+    ["－", "-"],
+    ["−", "-"],
+    ["‐", "-"],
+    ["–", "-"],
+    ["—", "-"],
+    ["‒", "-"],
+    ["‑", "-"],
+    ["﹘", "-"],
+    ["﹣", "-"],
+    ["×", "×"],
+    ["✕", "×"],
+    ["✖", "×"],
+    ["⨯", "×"],
+    ["*", "×"],
+    ["＊", "×"],
+    ["·", "×"],
+    ["∙", "×"],
+    ["⋅", "×"],
+    ["x", "×"],
+    ["X", "×"],
+    ["ｘ", "×"],
+    ["Ｘ", "×"],
+    ["÷", "÷"],
+    ["➗", "÷"],
+    ["/", "÷"],
+    ["／", "÷"],
+    ["∕", "÷"],
+    ["⁄", "÷"],
+  ]);
+
+  for (const char of compact) {
+    if (operatorMap.has(char)) return operatorMap.get(char);
+  }
+
+  return compact;
 }
 
 function checkAnswers() {
@@ -658,10 +719,6 @@ function confirmAndRegenerate() {
     regenerate();
   }
 }
-
-els.gridSize.addEventListener("change", () => {
-  els.maxEquations.value = String(maxEquationCountForSize(Number(els.gridSize.value)));
-});
 
 els.generateButton.addEventListener("click", confirmAndRegenerate);
 els.checkButton.addEventListener("click", checkAnswers);
